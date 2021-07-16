@@ -15,7 +15,7 @@ class LegOrder(Enum):
     HR = 3
 
 
-class FrameName(object):
+class FrameName():
     """
     Class for managing frame names without hardcoding or string parsing.
     TODO(yycho0108): Figure out a better architecture.
@@ -39,17 +39,25 @@ class FrameName(object):
     A = 'a'
     B = 'b'
 
-    def __init__(self, prefix='', suffix=''):
+    def __init__(self, prefix: str='', suffix: str=''):
+        """Initialize a FrameName instance
+
+        Args:
+            prefix (str, optional): The prefix string to use for the joints.
+                Defaults to ''.
+            suffix (str, optional): The suffix to use for the joints. Defaults
+                to ''.
+        """
         self.GLOBAL = FrameName.GLOBAL
         self.LOCAL = FrameName.LOCAL
         self.BODY = FrameName.BODY
 
         prefix = prefix + (FrameName.DELIM if len(prefix) > 0 else '')
         suffix = (FrameName.DELIM if len(suffix) > 0 else '') + suffix
-        self.LEG = '{}{}'.format(prefix, FrameName.LEG)
-        self.HIP = '{}{}{}'.format(prefix, FrameName.HIP, suffix)
-        self.KNEE = '{}{}{}'.format(prefix, FrameName.KNEE, suffix)
-        self.FOOT = '{}{}{}'.format(prefix, FrameName.FOOT, suffix)
+        self.LEG = f'{prefix}{FrameName.LEG}'
+        self.HIP = f'{prefix}{FrameName.HIP}{suffix}'
+        self.KNEE = f'{prefix}{FrameName.KNEE}{suffix}'
+        self.FOOT = f'{prefix}{FrameName.FOOT}{suffix}'
 
 
 class PhonebotSettings(Settings):
@@ -90,6 +98,9 @@ class PhonebotSettings(Settings):
     servo_torque: float
 
     def __init__(self, **kwargs):
+        """Initialize the PhonebotSettings with default values which
+        can be overriden.
+        """
         # Displacement from body origin to leg origin.
         self.leg_offset = (0.041418, 0.0425, -0.010148)
         self.leg_sign = [(1, 1, 1), (1, -1, 1), (-1, 1, 1), (-1, -1, 1)]
@@ -149,7 +160,8 @@ class PhonebotSettings(Settings):
         self.build()
 
     def build(self):
-        """ Build derived properties """
+        """Build derived properties
+        """
         joint_names = []
         active_joint_names = []
         passive_joint_names = []

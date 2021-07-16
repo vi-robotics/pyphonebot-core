@@ -3,12 +3,12 @@
 from abc import abstractmethod, ABCMeta
 
 import zlib
-import sys
 import pickle
 from collections import deque
 
 
 class Serializable(metaclass=ABCMeta):
+
     @abstractmethod
     def encode(self, *args, **kwargs) -> bytes:
         raise NotImplementedError("encode")
