@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from shapely.geometry import Polygon
+
 from phonebot.core.common.config import PhonebotSettings
 from phonebot.core.common.math.transform import Position, Rotation, Transform
 from phonebot.core.controls.trajectory import Trajectory
@@ -15,11 +17,16 @@ from phonebot.core.common.logger import get_default_logger
 logger = get_default_logger()
 
 
+def custom_workspace_planner(source: Position, target: Position,
+                             config: PhonebotSettings):
+    """Specialized planner for optimal shortest-path planning between two
+    points within the phonebot leg workspace."""
+    pass
+
+
 def _clamp_target(source: Position, target: Position,
                   max_distance=0.01) -> Position:
-    """
-    Clamp target position to a maximum distance from the source position.
-    """
+    """Clamp target position to a maximum distance from the source position."""
     # Currently sets the output position to a small increment from current
     # position instead.
 
@@ -37,10 +44,8 @@ def _clamp_target(source: Position, target: Position,
 
 
 class TrajectoryController(object):
-    """
-    Open loop controller that follows the supplied trajectory
-    evaluated according to the timestamp.
-    """
+    """Open loop controller that follows the supplied trajectory evaluated
+    according to the timestamp."""
 
     def __init__(self, trajectory: Trajectory):
         self.trajectory_ = trajectory
@@ -52,8 +57,7 @@ class TrajectoryController(object):
 
 
 class EndpointTrajectoryGraphController(object):
-    """
-    Alternative version of EndpointTrajectoryController that automatically
+    """Alternative version of EndpointTrajectoryController that automatically
     sets up required transform lookups from the provided frame graph.
 
     FIXME(yycho0108): Wrap around EndpointTrajectoryController instead?
@@ -131,9 +135,8 @@ class EndpointTrajectoryGraphController(object):
 
 
 class EndpointTrajectoryGraphControllerManual(object):
-   """
-   Alternative version of EndpointTrajectoryControllerManual
-   that enables manually setting the current trajectory position.
+   """Alternative version of EndpointTrajectoryControllerManual that enables
+   manually setting the current trajectory position.
 
    FIXME(yycho0108): Reduce code duplication here.
    FIXME(ycho): Consider removing this class entirely?

@@ -5,3 +5,4 @@ from . import controls
 from . import dynamics
 from . import frame_graph
 from . import kinematics
+from . import planning
