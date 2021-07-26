@@ -21,7 +21,13 @@ def custom_workspace_planner(source: Position, target: Position,
                              config: PhonebotSettings):
     """Specialized planner for optimal shortest-path planning between two
     points within the phonebot leg workspace."""
-    pass
+
+    small_radius = config.knee_link_length - config.hip_link_length
+    large_radius = config.knee_link_length + config.hip_link_length
+
+    center_a = Position(config.hip_joint_offset, 0, 0)
+    center_b = Position(config.hip_joint_offset, 0, 0)
+    # Path mgg
 
 
 def _clamp_target(source: Position, target: Position,
