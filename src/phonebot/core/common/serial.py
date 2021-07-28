@@ -6,6 +6,7 @@ from typing import Any, Dict
 import zlib
 import pickle
 from collections import deque
+from collections.abc import Iterable
 
 
 class Serializable(metaclass=ABCMeta):
@@ -111,7 +112,8 @@ def encode(data: Serializable, class_map: Dict[Any, int] = None) -> bytes:
     elif isinstance(data, str):
         dbytes = str.encode(data)
     elif isinstance(data, dict):
-        dbytes = {encode(k, class_map): encode(v, class_map) for k, v in data.items()}
+        dbytes = {encode(k, class_map): encode(v, class_map)
+                  for k, v in data.items()}
     elif isinstance(data, (tuple, list, deque)):
         # Handle explicit list-like iterables.
         # NOTE(yycho0108): Not checking for __iter__
@@ -141,10 +143,41 @@ def encode(data: Serializable, class_map: Dict[Any, int] = None) -> bytes:
 
 
 def compress(data: bytes) -> bytes:
+    """Compress a byte array using zlib
+
+    Args:
+        data (bytes): Binary data to be compressed
+
+    Returns:
+        bytes: A byte array of compressed data.
+    """
     return zlib.compress(data)
 
 
+def decompress(data: bytes) -> bytes:
+    """Decompress a byte array using zlib
+
+    Args:
+        data (bytes): Binary data to decompress
+
+    Returns:
+        bytes: A byte array of uncompressed data
+    """
+    return zlib.decompress(data)
+
+
 def decode(data: bytes, class_map=None) -> Serializable:
+    """Decode a serializable data
+
+    Args:
+        data (bytes): An byte array to decode.
+        class_map (Dict[Any, int], optional): An existing mapping (dict) from
+            class to int. If none is provided, then one is created and it's
+            inverse is passed . Defaults to None.
+    Returns:
+        Serializable: The resulting decoded data.
+    """
+
     # Resolve global object
     is_root = (class_map is None)
     if is_root:
@@ -171,11 +204,7 @@ def decode(data: bytes, class_map=None) -> Serializable:
         return deque(decode(x, class_map) for x in d)
     elif issubclass(cls, bytes):
         return d
-    # elif hasattr(cls, '__iter__'):
-    #    # warn
-    #    return cls([decode(x) for x in data])
+    elif issubclass(cls, Iterable):
+        return cls([decode(x) for x in data])
     else:
-        # print('fallback = {} {}'.format(cls, d))
         return _decode(d)
-        # raise NotImplementedError(
-        #    'unsupported class = {}'.format(cls, d))

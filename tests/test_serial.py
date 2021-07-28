@@ -1,6 +1,8 @@
 import unittest
 
-from phonebot.core.common.serial import Serializable, decode, encode
+from src.phonebot.core.common.serial import (
+    Serializable, compress, decode, encode, decompress
+)
 
 
 class TestSerial(unittest.TestCase):
@@ -28,6 +30,12 @@ class TestSerial(unittest.TestCase):
         ds_decode = DummySerializable.decode(ds_bytes)
 
         self.assertTrue(ds.num == ds_decode.num)
+
+        compressed_bytes = compress(ds_bytes)
+        decompressed_bytes = decompress(compressed_bytes)
+        ds_comp_decode = DummySerializable.decode(decompressed_bytes)
+
+        self.assertTrue(ds.num == ds_comp_decode.num)
 
 
 if __name__ == "__main__":
