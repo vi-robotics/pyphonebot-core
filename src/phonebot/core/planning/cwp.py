@@ -14,7 +14,17 @@ from matplotlib.patches import Arc
 from matplotlib.colors import TABLEAU_COLORS
 
 
+def _sq_norm(x: np.ndarray):
+    """When in doubt, use einsum."""
+    return np.einsum('...i,...i->...', x, x)
+
+
 def circle_segment_intersects(circle: np.ndarray, segment: np.ndarray):
+    """
+    circle: array(..., 3) encoded as (x,y,r)
+    segment: array(..., 2, 2) encoded as ((x1,y1), (x2,y2))
+    """
+
     center = circle[..., :2]
     radius = circle[..., 2]
     source = segment[..., 0, :2]
@@ -27,28 +37,6 @@ def circle_segment_intersects(circle: np.ndarray, segment: np.ndarray):
     e = source + u[..., None] * ba
     sqd = _sq_norm(center - e)
     out = (sqd + 1e-6) <= np.square(radius)
-    return out
-
-    d = target - source
-    f = source - center
-    a = _sq_norm(d)
-    b = 2 * np.einsum('...a,...a->...', f, d)
-    c = _sq_norm(f) - np.square(radius)
-
-    print(a.shape)
-    print(b.shape)
-    print(c.shape)
-    print((4 * a * c).shape)
-    print((b * b).shape)
-    return (4 * a * c) <= (b * b)
-    return np.square(b) >= 4 * a * c
-
-    u = np.einsum('...a,...a->...', ca, ba) / _sq_norm(ba)
-    u = np.clip(u, 0.0, 1.0)
-    e = segment[..., 0] + u[..., None] * ba
-    sqd = _sq_norm(center - e)
-    out = (sqd + 1e-6) <= np.square(radius)
-    print(out.shape)
     return out
 
 
@@ -69,11 +57,6 @@ def cycle(seq: Iterable):
     for b in it:
         yield b
     yield a
-
-
-def _sq_norm(x: np.ndarray):
-    """When in doubt, use einsum."""
-    return np.einsum('...i,...i->...', x, x)
 
 
 def _angular_neighbors(i0, h0, i1, h1):
