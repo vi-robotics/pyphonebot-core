@@ -10,17 +10,31 @@ from phonebot.core.common.math.utils import normalize, norm, adiff
 from phonebot.core.common.config import PhonebotSettings
 
 from matplotlib import pyplot as plt
+from matplotlib.collections import LineCollection
 from matplotlib.patches import Arc
 from matplotlib.colors import TABLEAU_COLORS
 
+from functools import cmp_to_key
+
 
 def _sq_norm(x: np.ndarray):
-    """When in doubt, use einsum."""
+    """x^T@x; when in doubt, use einsum."""
     return np.einsum('...i,...i->...', x, x)
 
 
-def circle_segment_intersects(circle: np.ndarray, segment: np.ndarray):
+def circle_point_intersects(circle: np.ndarray, point: np.ndarray):
+    """Boolean check for circle-point intersection.
+
+    circle: array(..., 3) encoded as (x,y,r)
+    point: array(..., 2) encoded as (x',y')
     """
+    sqr = _sq_norm(circle[..., :2] - point)
+    return sqr < np.square(circle[..., 2])
+
+
+def circle_segment_intersects(circle: np.ndarray, segment: np.ndarray):
+    """Boolean check for circle-segment intersection.
+
     circle: array(..., 3) encoded as (x,y,r)
     segment: array(..., 2, 2) encoded as ((x1,y1), (x2,y2))
     """
@@ -42,6 +56,7 @@ def circle_segment_intersects(circle: np.ndarray, segment: np.ndarray):
 
 def pairwise(seq: Iterable):
     """adjacent pairs: (x[i],x[i+1])"""
+    # TODO(ycho): Dump these utility functions in core/common.
     it = iter(seq)
     a = next(it, None)
     for b in it:
@@ -51,6 +66,7 @@ def pairwise(seq: Iterable):
 
 def cycle(seq: Iterable):
     """Wrap to first element: x[:] + x[:1]"""
+    # TODO(ycho): Dump these utility functions in core/common.
     it = iter(seq)
     a = next(it, None)
     yield a
@@ -60,37 +76,16 @@ def cycle(seq: Iterable):
 
 
 def _angular_neighbors(i0, h0, i1, h1):
-    # FIXME(ycho):
-    # TODO(ycho):
-    # WARN(ycho):
-    # NOTE(ycho):
-    # Implement this.
-    i_ref = np.searchsorted(h0, h1)
+    # Insertion index
+    i_ins = np.searchsorted(h0, h1, side='right') - 1
+    i_lo = i0[i_ins]
 
-    i_lo = []
-    i_hi = []
-    for ii in range(1, len(i_ref)):
-        if len(i_lo) <= 0:
-            i_lo.append(ii)
-            continue
+    # NOTE(ycho): `roll` required to deal with wraps.
+    i_lo_prv = np.roll(i_lo, 1)
+    dup = np.argwhere(i_lo == i_lo_prv).ravel()
+    i_lo[dup] = i1[dup - 1]
 
-        if i_ref[ii] == i_ref[ii - 1]:
-            i_lo.append(i1[ii - 1])
-
-    # Assumes h0,h1 are sorted, btw.
-
-    # 1. merge and sort
-    # h = np.sort(np.r_[h0, h1])
-
-    # 2. find self; guaranteed since it contains self
-    h = np.insert(h0, i_ref, h1)
-
-    i = np.insert(i0, i_ref, i1)
-    i_ref = np.searchsorted(i, i1)
-    i_lo = i[(i_ref - 1) % len(h)]
-    i_hi = i[(i_ref + 1) % len(h)]
-
-    return (i_lo, i_hi)
+    return i_lo
 
 
 class CircleWorldPlanner:
@@ -190,7 +185,6 @@ class CircleWorldPlanner:
                 circle = self.circles[i]
                 center = circle[:2]
                 radius = circle[2]
-                sqr = np.square(radius)
 
                 # Nodes that belong to circle
                 #if len(node_index_map[i]) <= 0:
@@ -223,7 +217,8 @@ class CircleWorldPlanner:
 
         cache = dict(
             node_index_map=node_index_map,
-            node_ang_map=node_ang_map
+            node_ang_map=node_ang_map,
+            node_offset=(2 * m)
         )
         return G, cache
 
@@ -236,6 +231,30 @@ class CircleWorldPlanner:
             (-cfg.hip_joint_offset, 0, small_radius)
         )
         return cls(circles)
+
+    def _spatial_path(self, G: nx.Graph, path: Tuple[int, ...]):
+        """Convert the list of edges to a spatial path."""
+        out = []
+        for n0, n1 in pairwise(path):
+            p0 = G.nodes[n0]['pos']
+            p1 = G.nodes[n1]['pos']
+
+            e = G.get_edge_data(n0, n1)
+            if e['center'] is None:
+                # straight line
+                dp = p1 - p0
+                out.append(p0 + np.linspace(0.0, 1.0)[:, None] * dp)
+            else:
+                # arc
+                c = self.circles[e['center']]
+                h0 = np.arctan2(*(p0 - c[:2])[::-1])
+                h1 = np.arctan2(*(p1 - c[:2])[::-1])
+                dh = adiff(h1, h0)
+                h = h0 + np.linspace(0, dh)
+                p = c[:2] + c[2] * np.c_[np.cos(h), np.sin(h)]
+                out.append(p)
+        out = np.concatenate(out, axis=0)
+        return out
 
     def hack(self):
         n = nx.number_of_nodes(self.G)
@@ -257,31 +276,14 @@ class CircleWorldPlanner:
 
         # graph-valued path --> spatial trajectory
         # FIXME(ycho): Only for debugging, for now.
-        out = []
-        for n0, n1 in pairwise(path):
-            p0 = self.G.nodes[n0]['pos']
-            p1 = self.G.nodes[n1]['pos']
-
-            e = self.G.get_edge_data(n0, n1)
-            if e['center'] is None:
-                # straight line
-                dp = p1 - p0
-                out.append(p0 + np.linspace(0.0, 1.0)[:, None] * dp)
-            else:
-                # arc
-                c = self.circles[e['center']]
-                h0 = np.arctan2(*(p0 - c[:2])[::-1])
-                h1 = np.arctan2(*(p1 - c[:2])[::-1])
-                dh = adiff(h1, h0)
-                h = h0 + np.linspace(0, dh)
-                p = c[:2] + c[2] * np.c_[np.cos(h), np.sin(h)]
-                out.append(p)
-        out = np.concatenate(out, axis=0)
+        out = self._spatial_path(self.G, path)
         return out
 
-    def plan(self, waypoints: Tuple[Tuple[float, float], ...]):
+    def plan(
+            self, waypoints: Tuple[Tuple[float, float], ...], dbg: dict = None):
         # TODO(ycho): as_view = True or False ??
-        G = self.G.copy(as_view=True)
+        # G = self.G.copy(as_view=True)
+        G = self.G.copy()
         waypoints = np.asarray(waypoints)
 
         c0 = self.circles[:, None, ...]  # N,1,2
@@ -303,7 +305,7 @@ class CircleWorldPlanner:
             s = np.sqrt(1 - np.square(c))  # N,M
 
             u0 = np.einsum('abnm, bnm -> nma', R, [c, s])  # N,M,2
-            u1 = np.einsum('abnm, bn, -> nma', R, [c, -s])  # N,M,2
+            u1 = np.einsum('abnm, bnm -> nma', R, [c, -s])  # N,M,2
 
             src.append(c0[..., :2] + r0[..., None] * u0)  # C; N,M,2
             src.append(c0[..., :2] + r0[..., None] * u1)  # D; N,M,2
@@ -313,53 +315,115 @@ class CircleWorldPlanner:
         m = dist.size
 
         # Add waypoint nodes.
-        wpt_idx0 = G.number_of_nodes()
+        # NOTE(ycho): can't just naively use num_nodes() here,
+        # Since we omit certain "invalid" nodes in node indexing.
+        wpt_idx0 = self.cache['node_offset']
         for i, wpt in enumerate(waypoints):
             G.add_node(wpt_idx0 + i, pos=wpt)
 
         # Add tangent nodes + edges.
-        idx0 = G.number_of_nodes()
+        idx0 = wpt_idx0 + len(waypoints)
         node_index_map = defaultdict(list)
-        for ni, i in enumerate(np.indices(dist.shape)):
-            ci, wpi = i[-1]  # circle, waypoint
+        iii = np.indices(dist.shape)
+        iii = iii.reshape(iii.shape[0], -1).T
+        for ni, i in enumerate(iii):
+            # _, circle, waypoint
+            _, ci, wpi = i
 
             node_index = idx0 + ni
             waypoint_index = wpt_idx0 + wpi
 
+            # Bookkeeping index map ...
+            node_index_map[ci].append(node_index)
+
+            segment = np.stack([src[tuple(i)], waypoints[wpi]])
+            invalid = circle_segment_intersects(self.circles[:, None],
+                                                segment[None, :]).any()
+            if invalid:
+                continue
+
             # Add node tangent to circle.
-            G.add_node(node_index, pos=src[i])
+            G.add_node(node_index, pos=src[tuple(i)])
 
             # Add surfing edge.
             G.add_edge(node_index, waypoint_index,
-                       length=dist[i], center=None)
+                       length=dist[tuple(i)], center=None)
 
-            # Bookkeeping index map ...
-            node_index_map[ci].append(ni)
+            if dbg is not None:
+                if ('edge' not in dbg):
+                    dbg['edge'] = []
+                dbg['edge'].append((src[tuple(i)], waypoints[wpi]))
+
+        # NOTE(ycho): Add edges `between` waypoint nodes.
+        # This would be the equivalent of `surfing` edges (bitangents)
+        # occurring amongst elements of `waypoint` nodes.
+        for i0, i1 in itertools.combinations(range(len(waypoints)), 2):
+            # print(self.circles.shape)
+            segment = waypoints[(i0, i1), :2]
+            invalid = circle_segment_intersects(
+                self.circles[:, None],
+                segment[None, :]).any()
+            if invalid:
+                continue
+            G.add_edge(
+                wpt_idx0 + i0, wpt_idx0 + i1,
+                length=norm(waypoints[i0, :2] - waypoints[i1, :2]).squeeze(),
+                center=None)
 
         # Add hugging edges.
-        # FIXME(ycho): THIS PART DOES NOT WORK at the moment.
-        # It should be implemented I guess but it's too complex for me to
-        # figure out right now.
-        n = len(self.circles)
-        for ci in range(n):
-            node_indices = np.asarray(node_index_map[ci])
+        if True:
+            n = len(self.circles)
+            for ci in range(n):
+                node_indices = np.asarray(node_index_map[ci])
+                if node_indices.size <= 0:
+                    continue
 
-            # Compute angle
-            rel_pos = src[:, ci] - c0[None, ci]  # 2,M,2 - 1,1,2
-            node_ang = np.arctan2(rel_pos[..., 1], rel_pos[..., 0])
+                # Compute angles.
+                # FIXME(ycho): Technically, we're duplicating work from above.
+                rel_pos = src[:, ci] - c0[None, ci, ..., :2]  # 2,M,2 - 1,1,2
+                node_ang = np.arctan2(rel_pos[..., 1], rel_pos[..., 0])
+                node_ang = node_ang.ravel()
 
-            # Sort and update angles/indices
-            node_order = np.argsort(node_ang)
-            node_indices = node_indices[node_order]
-            node_ang = node_ang[node_order]
+                # Sort and update angles/indices
+                node_order = np.argsort(node_ang)
+                node_indices = node_indices[node_order]
+                node_ang = node_ang[node_order]
 
-            # Find nodes to Connect to
-            prev_node_indices = self.cache['node_index_map'][ci]
-            prev_node_ang = self.cache['node_ang_map'][ci]
-            i_lo, i_hi = _angular_neighbors(
-                prev_node_indices, prev_node_ang, node_indices, node_ang)
-            G.add_edge(node_index, i_lo, length=np.nan, center=ci)
-            G.add_edge(node_index, i_hi, length=np.nan, center=ci)
+                # Find nodes to Connect to
+                prev_node_indices = self.cache['node_index_map'][ci]
+                prev_node_ang = self.cache['node_ang_map'][ci]
+
+                # Hmm.....
+                all_indices = np.r_[prev_node_indices, node_indices]
+                all_angs = np.r_[prev_node_ang, node_ang]
+                order = np.argsort(all_angs)
+                for ii0, ii1 in pairwise(cycle(order)):
+                    i0, i1 = all_indices[ii0], all_indices[ii1]
+                    h0, h1 = all_angs[ii0], all_angs[ii1]
+                    if i0 not in G.nodes or i1 not in G.nodes:
+                        continue
+                    if i0 >= idx0 or i1 >= idx0:
+                        arclen = self.circles[ci, 2] * np.abs(adiff(h1, h0))
+                        G.add_edge(i0, i1, length=arclen, center=ci)
+
+                        if dbg is not None:
+                            if ('edge' not in dbg):
+                                dbg['edge'] = []
+                            p0 = G.nodes[i0]['pos']
+                            p1 = G.nodes[i1]['pos']
+                            dbg['edge'].append((p0, p1))
+
+        # Stitch together a path ...
+        path = []
+        for (wpi0, wpi1) in pairwise(range(len(waypoints))):
+            path.extend(
+                nx.shortest_path(
+                    G,
+                    wpt_idx0 + wpi0,
+                    wpt_idx0 + wpi1,
+                    weight='length'))
+        path = self._spatial_path(G, path)
+        return np.asarray(path)
 
 
 def generate_non_overlapping_circles(n: int):
@@ -369,8 +433,8 @@ def generate_non_overlapping_circles(n: int):
         circle = np.random.normal(size=3)
         circle[2] = np.abs(circle[2])
 
-        if index < 2:
-            circle[2] = 1e-8
+        #if index < 2:
+        #    circle[2] = 1e-8
 
         if (_sq_norm(out[:index, :2] - circle[None, :2])
                 > np.square(circle[2] + out[:index, 2])).all():
@@ -381,21 +445,34 @@ def generate_non_overlapping_circles(n: int):
 
 def main():
     seed = np.random.randint(2**16 - 1)
+    # seed = 31331
     print(F'seed:{seed}')
     np.random.seed(seed)
     # np.random.seed(6)
 
     # circles = np.random.normal(size=(16, 3))
     # circles[..., 2] = 0.4 * np.abs(circles[..., 2])
-    circles = generate_non_overlapping_circles(32)
+    circles = generate_non_overlapping_circles(64)
     cwp = CircleWorldPlanner(circles)
 
     for c in circles:
         p = plt.Circle((c[0], c[1]), radius=c[2], fill=False, color='c')
         plt.gca().add_patch(p)
     plt.gca().set_aspect('equal', adjustable='datalim')
+    dbg = {}
 
-    path = cwp.hack()
+    while True:
+        min_bound = np.min(circles[..., :2] - circles[..., 2:], axis=0)
+        max_bound = np.max(circles[..., :2] + circles[..., 2:], axis=0)
+        wpts = np.random.uniform(
+            low=min_bound, high=max_bound,
+            size=(2, 2))
+        if not circle_point_intersects(circles[:, None], wpts[None, :]).any():
+            break
+
+    path = cwp.plan(wpts, dbg=dbg)
+    # path = cwp.hack()
+    segments = []
     for e in cwp.G.edges(data=True):
         ed = e[2]
 
@@ -405,8 +482,10 @@ def main():
 
         if ed['center'] is None:
             # straight line
-            plt.plot(ps[..., 0], ps[..., 1], 'k*--', alpha=0.5)
+            # plt.plot(ps[..., 0], ps[..., 1], 'k*--', alpha=0.5)
+            segments.append(ps)
         else:
+            continue
             # arc (hugging edge)
             c = circles[ed['center']]
             if not np.isfinite(c).all():
@@ -432,11 +511,22 @@ def main():
                 linewidth=8, linestyle='--')
             plt.gca().add_patch(arc)
             # plt.plot([x0, x1], [y0, y1], 'r*--', alpha=0.5)
+    col = LineCollection(segments, color='gray', alpha=0.5, linestyle='--')
+    plt.gca().add_collection(col)
+
+    print(len(dbg['edge']))
+    col = LineCollection(dbg['edge'], color='blue')
+    plt.gca().add_collection(col)
+    #for p0, p1 in dbg['edge']:
+    #    x = p0[0], p1[0]
+    #    y = p0[1], p1[1]
+    #    plt.plot(x, y, label='extra-edge')
     plt.plot(path[..., 0], path[..., 1], 'r-')
-    plt.plot(*path[0], 'ro')
-    plt.plot(*path[-1], 'bo')
+    plt.plot(wpts[..., 0], wpts[..., 1], 'ro', markersize=10)
+    # plt.plot(*path[-1], 'bo', markersize=10)
     plt.gca().plot()
     plt.grid()
+    plt.legend()
     plt.show()
 
 
