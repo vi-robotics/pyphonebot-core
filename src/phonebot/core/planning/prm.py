@@ -1,13 +1,28 @@
 #!/usr/bin/env python3
+"""PRM Implementation.
+
+Mostly adapted from yycho0108/PRM, intended for brute-force testing in
+path-planning scenarios.
+"""
 
 from typing import Tuple, Callable
 import numpy as np
-from tqdm.auto import tqdm
-from scipy.spatial import cKDTree
 import networkx as nx
+import logging
+
+has_kdtree = False
+try:
+    from scipy.spatial import cKDTree
+    has_kdtree = True
+except ImportError:
+    # TODO(ycho): It's technically possible to supplant KDTree queries
+    # either with non-scipy backends or brute-force search.
+    logging.warn('PRM planner will be unusable since KDTree is unavailable.')
 
 
 class PRM:
+    """Probabilistic Roadmap Planner."""
+
     def __init__(self,
                  sample_fn: Callable[[int], np.ndarray],
                  query_fn: Callable[[np.ndarray], bool],
@@ -31,10 +46,11 @@ class PRM:
         self._graph = None  # graph
 
         # Helpers
-        self.D = None  # edge distances
+        self._edge_dists = None  # edge distances
         self.tree = None  # KDTree for fast spatial neighborhood queries
 
     def _construct_vertices(self):
+        """Randomly generate vertices from sampler."""
         N = self.N
 
         count = 0
@@ -54,7 +70,8 @@ class PRM:
             self._vertices[count: new_count] = q
             count = new_count
 
-    def _construct_edges(self, aux: dict = {}):
+    def _construct_edges(self):
+        """Add locally-connected edges to graph."""
         self.tree = cKDTree(self._vertices)
         dist, inds = self.tree.query(self._vertices, k=self.K + 1)
 
@@ -69,35 +86,34 @@ class PRM:
         src = np.broadcast_to(src[:, None], dst.shape)
         nbr = np.stack([src, dst], axis=-1)
 
-        # NOTE(ycho): Export auxiliary outputs.
-        aux['v'] = self._vertices
-        aux['nbr'] = nbr
-        aux['con'] = con
-
         self._edges = nbr[con]
-        self.D = dist[..., 1:][con]
+        self._edge_dists = dist[..., 1:][con]
 
     def _construct_graph(self):
         """Construct a networkx graph."""
         G = nx.Graph()
         G.add_weighted_edges_from(
-            [(i0, i1, d) for(i0, i1), d in zip(self._edges, self.D)],
+            [(i0, i1, d) for(i0, i1), d
+                in zip(self._edges, self._edge_dists)],
             axis=-1)
         self._graph = G
 
     def construct(self):
+        """Shorthand for calling all internal builder functions."""
         self._construct_vertices()
         self._construct_edges()
         self._construct_graph()
 
     def plan(self, q0, q1):
+        """Path from `q0` to `q1`"""
         q0 = np.asarray(q0)
         q1 = np.asarray(q1)
         _, (i0, i1) = self.tree.query([q0, q1], k=self.K)
 
         # Connect q0,q1 to roadmap
         src = np.stack([q0, q1])[:, None, :]  # 2,1,2
-        dst = self._vertices[np.stack([i0, i1], axis=0), :]  # 2,4,2 == 2,K,D
+        dst = self._vertices[np.stack(
+            [i0, i1], axis=0), :]  # 2,4,2 == 2,K,D
         con = self._plan_local(src, dst)
 
         # Require that at least one connection was established
@@ -114,4 +130,5 @@ class PRM:
             p = nx.shortest_path(self._graph, source=i0, target=i1)
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             return None
-        return np.concatenate([q0[None], self._vertices[p], q1[None]], axis=0)
+        return np.concatenate(
+            [q0[None], self._vertices[p], q1[None]], axis=0)

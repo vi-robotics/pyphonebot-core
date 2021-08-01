@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
+"""2D Circular world shortest-path planner.
+
+Decomposes the circular world into line- and arc-based edges, and runs
+shortest-path graph search on pre-built graph with additional waypoints.
+"""
 
 import numpy as np
 from typing import Tuple, Iterable
 import itertools
 import networkx as nx
-from contextlib import contextmanager
 from collections import defaultdict
-from typing import Dict, Callable, Any
-import time
-from tqdm.auto import tqdm
 
 from phonebot.core.common.math.utils import normalize, norm, adiff
 from phonebot.core.common.config import PhonebotSettings
@@ -16,13 +17,8 @@ from phonebot.core.common.geometry.geometry import (
     circle_point_intersects, circle_segment_intersects)
 
 
-def _sq_norm(x: np.ndarray):
-    """x^T@x; when in doubt, use einsum."""
-    return np.einsum('...i,...i->...', x, x)
-
-
 def pairwise(seq: Iterable):
-    """adjacent pairs: (x[i],x[i+1])"""
+    """Iterate through adjacent pairs: (x[i],x[i+1])"""
     # TODO(ycho): Dump these utility functions in core/common.
     it = iter(seq)
     a = next(it, None)
@@ -32,7 +28,7 @@ def pairwise(seq: Iterable):
 
 
 def cycle(seq: Iterable):
-    """Wrap to first element: x[:] + x[:1]"""
+    """Iterate and wrap to first element: x[:] + x[:1]"""
     # TODO(ycho): Dump these utility functions in core/common.
     it = iter(seq)
     a = next(it, None)
@@ -40,25 +36,6 @@ def cycle(seq: Iterable):
     for b in it:
         yield b
     yield a
-
-
-@contextmanager
-def timer(name: str):
-    """Simple timer."""
-    import time
-    try:
-        t0 = time.time()
-        yield
-    finally:
-        t1 = time.time()
-        dt = 1000.0 * (t1 - t0)
-        print(F'{name} took {dt} ms')
-
-
-def print_mean_time(result: Dict[str, Tuple[float, ...]]):
-    for k, v in result.items():
-        v = 1000.0 * np.sum(v)
-        print(F'{k}: {v:.3f}ms')
 
 
 class CircleWorldPlanner:
@@ -72,10 +49,19 @@ class CircleWorldPlanner:
     """
 
     def __init__(self, circles: Tuple[Tuple[float, float, float], ...]):
+        """
+        Args:
+            circles: array(...,3) List of circles encoded as (x,y,radius)
+        """
         self.circles = np.asarray(circles, dtype=np.float32)
         self.G, self.cache = self._build_graph(nx.Graph())
 
     def _build_graph(self, G: nx.Graph) -> nx.Graph:
+        """Append path-planning nodes and edges to graph.
+
+        Args:
+            G: base graph, expected to be empty.
+        """
         # Compute index pairs.
         # NOTE(ycho): working with vectorized indices incurs memory cost:
         # n -> nC2. If efficiency becomes important,
@@ -99,9 +85,11 @@ class CircleWorldPlanner:
 
         src, dst = [], []
 
-        # Internal bi-tangents
-        if True:
-            c = (r0 + r1) / d.squeeze(axis=-1)
+        # Internal(+1)/External(-1) bi-tangents
+        for sign in [+1, -1]:
+            r1_ = sign * r1
+            c = (r0 + r1_)
+            c /= d.squeeze(axis=-1)
             s = np.sqrt(1 - np.square(c))
 
             u0 = np.einsum('abn, bn -> na', R, [c, s])
@@ -109,21 +97,8 @@ class CircleWorldPlanner:
 
             src.append(c0[..., :2] + r0[..., None] * u0)  # C
             src.append(c0[..., :2] + r0[..., None] * u1)  # D
-            dst.append(c1[..., :2] - r1[..., None] * u0)  # F
-            dst.append(c1[..., :2] - r1[..., None] * u1)  # E
-
-        # External bi-tangents
-        if True:
-            c = (r0 - r1) / d.squeeze(axis=-1)
-            s = np.sqrt(1 - np.square(c))
-
-            u0 = np.einsum('abn, bn -> na', R, [c, s])
-            u1 = np.einsum('abn, bn -> na', R, [c, -s])
-
-            src.append(c0[..., :2] + r0[..., None] * u0)  # C
-            src.append(c0[..., :2] + r0[..., None] * u1)  # D
-            dst.append(c1[..., :2] + r1[..., None] * u0)  # F
-            dst.append(c1[..., :2] + r1[..., None] * u1)  # E
+            dst.append(c1[..., :2] - r1_[..., None] * u0)  # F
+            dst.append(c1[..., :2] - r1_[..., None] * u1)  # E
 
         # Finalize surfing edges.
         rpos = np.concatenate(src + dst, axis=0)
@@ -150,37 +125,36 @@ class CircleWorldPlanner:
             node_index_map[i_circle0].append(i)
             node_index_map[i_circle1].append(i + m)
 
-        # Add hugging edges to the graph.
+        # Add `hugging` edges to the graph.
         node_ang_map = {}
-        if True:
-            for i in range(n):
-                # Circle index -> edge indices that touch said circle
-                circle = self.circles[i]
-                center = circle[:2]
-                radius = circle[2]
+        for i in range(n):
+            # Circle index -> edge indices that touch said circle
+            circle = self.circles[i]
+            center = circle[:2]
+            radius = circle[2]
 
-                # Nodes that belong to circle
-                #if len(node_index_map[i]) <= 0:
-                #    continue
-                node_indices = np.asarray(node_index_map[i])
+            # Nodes that belong to circle
+            #if len(node_index_map[i]) <= 0:
+            #    continue
+            node_indices = np.asarray(node_index_map[i])
 
-                node_rel_pos = rpos[node_indices] - center
-                node_ang = np.arctan2(
-                    node_rel_pos[..., 1],
-                    node_rel_pos[..., 0])
+            node_rel_pos = rpos[node_indices] - center
+            node_ang = np.arctan2(
+                node_rel_pos[..., 1],
+                node_rel_pos[..., 0])
 
-                node_order = np.argsort(node_ang)
-                node_indices = node_indices[node_order]
-                node_ang = node_ang[node_order]
+            node_order = np.argsort(node_ang)
+            node_indices = node_indices[node_order]
+            node_ang = node_ang[node_order]
 
-                # Update data in cache.
-                node_ang_map[i] = node_ang
-                node_index_map[i] = node_indices
+            # Update data in cache.
+            node_ang_map[i] = node_ang
+            node_index_map[i] = node_indices
 
-                for (i0, h0), (i1, h1) in pairwise(
-                        cycle(zip(node_indices, node_ang))):
-                    arclen = radius * np.abs(adiff(h1, h0))
-                    G.add_edge(i0, i1, length=arclen, center=i)
+            for (i0, h0), (i1, h1) in pairwise(
+                    cycle(zip(node_indices, node_ang))):
+                arclen = radius * np.abs(adiff(h1, h0))
+                G.add_edge(i0, i1, length=arclen, center=i)
 
         cache = dict(
             node_index_map=node_index_map,
@@ -190,7 +164,15 @@ class CircleWorldPlanner:
         return G, cache
 
     def _spatial_path(self, G: nx.Graph, path: Tuple[int, ...]):
-        """Convert the list of edges to a spatial path."""
+        """Convert the list of edges to a spatial path.
+
+        Args:
+            G: base graph structure containing node/edge data.
+            path: discrete path; list of node ids for `G`.
+
+        Returns:
+            Array of spatial coordinates mapepd from `path`.
+        """
         out = []
         for n0, n1 in pairwise(path):
             p0 = G.nodes[n0]['pos']
@@ -214,7 +196,17 @@ class CircleWorldPlanner:
         return out
 
     def plan(self, waypoints: Tuple[Tuple[float, float], ...]):
-        """Plan through waypoints."""
+        """
+
+        Args:
+            waypoints: array(..., 2) list of spatial waypoints to traverse through.
+
+        Returns:
+            The plan through the waypoints.
+
+        """
+        # TODO(ycho): What if the plan for supplied waypoints are infeasible?
+
         # TODO(ycho): Consider not using networkx, since
         # - graph copy takes forever (it really shouldn't)
         # - shortest path query takes forever
@@ -307,7 +299,7 @@ class CircleWorldPlanner:
             if node_indices.size <= 0:
                 continue
 
-            # Compute angles.
+            # Compute angles from relative positions to anchored circles.
             # FIXME(ycho): Technically, we're duplicating work from above.
             rel_pos = src[:, ci] - c0[None, ci, ..., :2]  # 2,M,2 - 1,1,2
             node_ang = np.arctan2(rel_pos[..., 1], rel_pos[..., 0])
@@ -322,7 +314,8 @@ class CircleWorldPlanner:
             prev_node_indices = self.cache['node_index_map'][ci]
             prev_node_ang = self.cache['node_ang_map'][ci]
 
-            # Hmm.....
+            # Find additional adjaceny nodes based on
+            # newly added nodes; most simply achieved by sorting.
             all_indices = np.r_[prev_node_indices, node_indices]
             all_angs = np.r_[prev_node_ang, node_ang]
             order = np.argsort(all_angs)
@@ -339,6 +332,9 @@ class CircleWorldPlanner:
         path = []
         # NOTE(ycho): takes forever
         for (wpi0, wpi1) in pairwise(range(len(waypoints))):
+            # TODO(ycho): For len(waypoints)>2,
+            # intermediate waypoints may be duplicated in the
+            # below path.
             path.extend(
                 nx.shortest_path(
                     G,
