@@ -2,8 +2,6 @@
 
 import numpy as np
 
-from shapely.geometry import Polygon
-
 from phonebot.core.common.config import PhonebotSettings
 from phonebot.core.common.math.transform import Position, Rotation, Transform
 from phonebot.core.controls.trajectory import Trajectory
@@ -16,18 +14,7 @@ from phonebot.core.kinematics.workspace import get_workspace
 from phonebot.core.common.logger import get_default_logger
 logger = get_default_logger()
 
-
-def custom_workspace_planner(source: Position, target: Position,
-                             config: PhonebotSettings):
-    """Specialized planner for optimal shortest-path planning between two
-    points within the phonebot leg workspace."""
-
-    small_radius = config.knee_link_length - config.hip_link_length
-    large_radius = config.knee_link_length + config.hip_link_length
-
-    center_a = Position(config.hip_joint_offset, 0, 0)
-    center_b = Position(config.hip_joint_offset, 0, 0)
-    # Path mgg
+from phonebot.core.planning.cwp import CircleWorldPlanner
 
 
 def _clamp_target(source: Position, target: Position,
@@ -72,12 +59,15 @@ class EndpointTrajectoryGraphController(object):
     def __init__(
             self, graph: FrameGraph, frame: str, trajectory: Trajectory,
             config: PhonebotSettings = PhonebotSettings()):
+        # TODO(ycho): [REFACTOR] suffix-underscore -> prefix-underscore;
+        # leaving as-is for now in order to not clutter the PR with multiple features.
         self.graph_ = graph
         self.frame_ = frame
         # FIXME(yycho0108): Avoid parsing frame string.
         self.leg_prefix_ = frame.split('_')[0]
         self.trajectory_ = trajectory
         self.config_ = config
+        self.planner_ = CircleWorldPlanner.from_phonebot(self.config_)
 
         # TODO(yycho0108): enable workspace querying once path-planning option is implemented.
         #self.workspace_ = get_workspace(0.0, config, return_poly=True)
