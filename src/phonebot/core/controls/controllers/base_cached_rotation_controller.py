@@ -9,7 +9,7 @@ import shapely.geometry
 
 from phonebot.core.common.config import PhonebotSettings
 from phonebot.core.common.logger import get_default_logger
-from phonebot.core.common.geometry.geometry import parallel_component, tangent_component, plane_plane_intersection
+from phonebot.core.common.geometry.geometry import parallel_component, plane_plane_intersection
 from phonebot.core.common.math.utils import normalize, lerp
 from phonebot.core.common.math.transform import Position, Rotation, Transform
 from phonebot.core.kinematics.workspace import get_workspace
