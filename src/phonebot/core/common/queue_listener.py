@@ -17,6 +17,17 @@ class QueueListener(Thread):
                  data_cb: Callable[[object], None],
                  timeout: float = 1.0,
                  *args, **kwargs):
+        """A thread which listens for additions to a queue in a list and then
+        calls a provided data processing function.
+
+        Args:
+            queue (Queue): The Queue to listen to.
+            data_cb (Callable[[object], None]): The call back for processing
+                the data in the queue.
+            timeout (float, optional): The timeout for each queue get call,
+                where the processing callback is called after the timeout.
+                Defaults to 1.0.
+        """
         self.queue_ = queue
         self.data_cb = data_cb
         self.timeout = timeout
@@ -24,12 +35,22 @@ class QueueListener(Thread):
         super().__init__(*args, **kwargs)
 
     def stop(self):
+        """Stop the thread
+        """
         self.stop_event_.set()
 
-    def stopped(self):
+    def stopped(self) -> bool:
+        """The stop event state
+
+        Returns:
+            bool: True if the stopped event is set.
+        """
         return self.stop_event_.is_set()
 
     def run(self):
+        """Run the queue get in a loop with a timeout. The only way to exit
+        the loop is to raise the stop event (call self.stop()).
+        """
         while not self.stopped():
             try:
                 data = self.queue_.get(timeout=self.timeout)
@@ -37,26 +58,3 @@ class QueueListener(Thread):
             except Empty:
                 # Only allowable exception is queue.Empty
                 continue
-
-
-def main():
-    indices = []
-
-    def data_cb(i):
-        indices.append(i)
-
-    queue = Queue()
-    queue_listener = QueueListener(queue, data_cb)
-    queue_listener.start()
-
-    for i in range(64):
-        queue.put_nowait(i)
-
-    while len(indices) < 64:
-        time.sleep(1e-9)
-
-    print(indices)
-
-
-if __name__ == '__main__':
-    main()

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-
+from typing import Union, Tuple
 import numpy as np
-import pickle
 
 from cho_util.math import transform as tx
 
@@ -11,10 +10,24 @@ __all__ = ['Position', 'Rotation', 'Transform']
 
 
 class Position(np.ndarray, Serializable):
+    """3-element Vector wrapper around ndarray.
     """
-    3-element Vector wrapper around ndarray.
-    """
-    def __new__(cls, input_array):
+    def __new__(cls, input_array: np.ndarray) -> "Position":
+        """Initialize a Position instance
+
+        Args:
+            input_array (np.ndarray): An array of shape (3,...) representing the
+                position.
+
+        Raises:
+            ValueError: input array is of the wrong shape
+
+        Returns:
+            Position: The resulting Position instance.
+        """
+        if input_array.shape[0] != 3:
+            raise ValueError("Input array is of shape"
+                             f" {input_array.shape}, expected (3,...)")
         obj = np.asarray(input_array, dtype=np.float64).view(cls)
         return obj
 
@@ -35,7 +48,7 @@ class Position(np.ndarray, Serializable):
         return super().__getitem__(1)
 
     @y.setter
-    def y(self, x):
+    def y(self, y):
         super().__setitem__(1, y)
 
     @property
@@ -47,13 +60,44 @@ class Position(np.ndarray, Serializable):
         super().__setitem__(2, z)
 
     @classmethod
-    def identity(cls):
-        return cls(np.zeros(3))
+    def identity(cls, size: Tuple = ()):
+        """The additive identity of position.
+
+        Args:
+            size (Tuple): The shape to give the axes after the first 3 (
+                which are x, y, z).
+
+                Example:
+                    >>> Position.identity(size=(4,5)).shape
+                    (3, 4, 5)
+
+        Returns:
+            Position: initialized with zeros.
+        """
+        # Handle size=(X) or size=(X,)
+        size = (3,) + tuple(np.reshape(size, [-1]))
+        return cls(np.zeros(size))
 
     @classmethod
-    def random(cls, size=(), *args, **kwargs):
-        size = tuple(np.reshape(size, [-1])) + (3,)
-        return cls(np.random.normal(size=size))
+    def random(cls, size: Tuple = (), scale: float = 1):
+        """Initialize a random position using a scaled normal distribution.
+
+        Args:
+            size (Tuple): The shape to give the axes after the first 3 (
+                which are x, y, z).
+
+                Example:
+                    >>> Position.random(size=(4,5)).shape
+                    (3, 4, 5)
+
+            scale (float, optional): A scalar to multiply the sampled values by.
+                Defaults to 1.
+
+        Returns:
+            Position: The randomly initialized Position object.
+        """
+        size = (3,) + tuple(np.reshape(size, [-1]))
+        return cls(np.random.normal(size=size) * scale)
 
     def encode(self, *args, **kwargs) -> bytes:
         return encode(self.tobytes(), *args, **kwargs)
@@ -157,50 +201,131 @@ class Rotation(np.ndarray, Serializable):
         super().__setstate__(state[0:-1])
 
     @classmethod
-    def identity(cls):
+    def identity(cls) -> "Rotation":
+        """The Identity rotation (as a quaternion)
+
+        Returns:
+            Rotation: The identity quaternion.
+        """
         return cls(Rotation.quaternion.identity(), Rotation._quaternion)
 
     @classmethod
     def random(cls, *args, **kwargs):
+        """Create a random Rotation using a random quaternion.
+
+        Returns:
+            Rotation: a randomly generated Rotation.
+        """
         return cls(Rotation.quaternion.random(*args, **kwargs), Rotation._quaternion)
 
     @classmethod
-    def from_quaternion(cls, value):
+    def from_quaternion(cls, value: np.ndarray):
+        """Create a Rotation from a quaternion
+
+        Args:
+            value (np.ndarray): an array of shape (4,) representing a
+                unit quaternion.
+
+        Returns:
+            Rotation: The resulting Rotation
+        """
         return cls(value, rtype=Rotation._quaternion)
 
     @classmethod
-    def from_axis_angle(cls, value):
+    def from_axis_angle(cls, value: np.ndarray):
+        """Create a Rotation from a rotation vector.
+
+        Args:
+            value (np.ndarray): an array of shape (3,) representing a rotation
+                vector.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         return cls(value, rtype=Rotation._axis_angle)
 
     @classmethod
-    def from_euler(cls, value):
+    def from_euler(cls, value: np.ndarray):
+        """Create a Rotation from euler angles (extrinsic xyz). This is
+        equivalent to using 'xyz' for seq with scipy.spatial.transform.Rotation:
+
+        https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.transform.Rotation.from_euler.html
+
+        Args:
+            value (np.ndarray): an array of shape (3,) representing extrinsic
+                xyz euler angles.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         return cls(value, rtype=Rotation._euler)
 
     @classmethod
-    def from_matrix(cls, value):
+    def from_matrix(cls, value: np.ndarray):
+        """Create a Rotation from a rotation matrix.
+
+        Args:
+            value (np.ndarray): A 3x3 rotation matrix.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         return cls(value, rtype=Rotation._matrix)
 
-    def to_quaternion(self):
+    def to_quaternion(self) -> "Rotation":
+        """Converts the Rotation to another Rotation with a quaternion base.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         if self.rtype == Rotation._quaternion:
             return self
         return Rotation(self.base.to_quaternion(self), Rotation._quaternion)
 
-    def to_axis_angle(self):
+    def to_axis_angle(self) -> "Rotation":
+        """Converts the Rotation to another Rotation with a rotation vector
+        base.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         if self.rtype == Rotation._axis_angle:
             return self
         return Rotation(self.base.to_axis_angle(self), Rotation._axis_angle)
 
-    def to_euler(self):
+    def to_euler(self) -> "Rotation":
+        """Converts the Rotation to another Rotation with an euler base (of the
+        convention extrinsic xyz).
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         if self.rtype == Rotation._euler:
             return self
         return Rotation(self.base.to_euler(self), Rotation._euler)
 
-    def to_matrix(self, *args, **kwargs):
+    def to_matrix(self, *args, **kwargs) -> "Rotation":
+        """Converts the Rotation to another Rotation with a matrix base.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         if self.rtype == Rotation._matrix:
             return self
         return Rotation(self.base.to_matrix(self, *args, **kwargs), Rotation._matrix)
 
-    def rotate(self, value):
+    def rotate(self, value: Union["Rotation", Position]) -> Union["Rotation",
+                                                                  Position]:
+        """Rotate a Rotation or a Position with the given Rotation. This is
+        equivalent to left multipling the Rotation by value.
+
+        Args:
+            value (Union[Rotation, Position]): A Position or Rotation to rotate.
+
+        Returns:
+            Union["Rotation", Position]: The rotated Position or Rotation (same
+                as input type of value).
+        """
         if isinstance(value, Rotation):
             # Compose rotations after mapping to quaternion.
             q0 = self.to_quaternion()
@@ -213,6 +338,11 @@ class Rotation(np.ndarray, Serializable):
             return NotImplemented
 
     def inverse(self):
+        """The inverse rotation, of the same type.
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         return Rotation(self.base.inverse(self), rtype=self.rtype)
 
     def __repr__(self):
@@ -228,7 +358,7 @@ class Rotation(np.ndarray, Serializable):
         data = (self.rtype, self.tobytes())
         return encode(data, *args, **kwargs)
 
-    def restore(self, data: bytes):
+    def restore(self, data: bytes, *args, **kwargs):
         rtype, b = decode(data, *args, **kwargs)
         self[...] = np.frombuffer(b)
         self.rtype = rtype
@@ -246,64 +376,145 @@ class Transform(Serializable):
     Simple transform utility class.
     """
 
-    def __init__(self, position, rotation, inverted=False):
+    def __init__(self, position: np.ndarray, rotation: np.ndarray,
+                 inverted: bool = False):
+        """Initialize a Transform with a position and rotation.
+
+        Args:
+            position (np.ndarray): An array of shape (3,) representing the
+                position (translation component of the transform).
+            rotation (np.ndarray): A unit quaternion array of shape (4,)
+                representing the rotation.
+            inverted (bool, optional): If True, then this transform is marked as
+                inverted and the inverse will be calculated lazily. Defaults to
+                False.
+        """
         self.position_ = Position(position)
         self.rotation_ = Rotation(rotation)
         self.inverted_ = inverted
 
     @classmethod
     def identity(cls):
+        """Return the idenity transform (no translation or rotation)
+
+        Returns:
+            Transform: the resulting Transform
+        """
         return cls(Position.identity(), Rotation.identity())
 
     @classmethod
-    def random(cls):
-        return cls(Position.random(), Rotation.random())
+    def random(cls, position_scale: float = 1):
+        """Return a random transform by uniformly sampling rotations, and
+        sampling Position from a normal distribution
+
+        Args:
+            position_scale (float, optional): A scalar to multiply the sampled
+                values of Position by. Defaults to 1.
+
+        Returns:
+            Transform: the resulting Transform
+        """
+        return cls(Position.random(scale=position_scale), Rotation.random())
 
     @classmethod
-    def from_rotation(cls, rotation):
+    def from_rotation(cls, rotation: Rotation):
+        """Create a Transform using the identity Position and the provided
+        rotation.
+
+        Args:
+            rotation (Rotation): The rotation to set for the transform.
+
+        Returns:
+            Transform: the resulting Transform
+        """
         return cls(Position.identity(), rotation)
 
     @classmethod
-    def from_position(cls, position):
+    def from_position(cls, position: Position):
+        """Create a Transform using the identity Rotation and the provided
+        position.
+
+        Args:
+            position (Position): The position to set for the transform.
+
+        Returns:
+            Transform: the resulting Transform
+        """
         return cls(position, Rotation.identity())
 
     @classmethod
-    def from_transform(cls, transform):
+    def from_transform(cls, transform: "Transform"):
+        """Copy an existing transform.
+
+        Args:
+            transform (Transform): the Transform to copy.
+
+        Returns:
+            Transform: the copied Transform.
+        """
         return cls(transform.position.copy(), transform.rotation)
 
-    def to_matrix(self):
+    def to_matrix(self) -> np.ndarray:
+        """Convert the Transform into a transformation matrix.
+
+        Returns:
+            np.ndarray: an array of transformation matrices of shape (..., 4, 4)
+        """
         T = np.zeros(
             shape=(self.position_.shape[:-1]) + (4, 4), dtype=np.float64)
-        R = self.rotation.to_matrix(out=T[..., :3, :3])
+        self.rotation.to_matrix(out=T[..., :3, :3])
         T[..., :3, -1] = self.position
         T[..., -1, -1] = 1.0
         return T
 
     @property
-    def position(self):
+    def position(self) -> Position:
+        """The position of the transform
+
+        Returns:
+            Position: the resulting Position
+        """
         if self.inverted_:
             return -self.rotation_.inverse().rotate(self.position_)
         else:
             return self.position_
 
     @position.setter
-    def position(self, value):
+    def position(self, value: Position):
+        """Set the position of the transform
+
+        Args:
+            value (Position): the Position object to set
+        """
         if self.inverted_:
             # a = -Ri * b
             # b = R * -a
-            self.position_ = self.rotation_.rotate(-value)
+            self.position_ = self.rotation_.rotate(-1 * value)
         else:
             self.position_ = value
 
     @property
-    def rotation(self):
+    def rotation(self) -> Rotation:
+        """The rotation of the transform
+
+        Returns:
+            Rotation: the resulting Rotation
+        """
         if self.inverted_:
             return self.rotation_.inverse()
         else:
             return self.rotation_
 
     @rotation.setter
-    def rotation(self, value):
+    def rotation(self, value: Rotation):
+        """Set the rotation of the transform
+
+        Args:
+            value (Rotation): the Rotation to set.
+
+        Raises:
+            ValueError: value is not a Rotation
+        """
         if not isinstance(value, Rotation):
             raise ValueError('Cannot set rotation component to non-rotation!')
 
@@ -312,10 +523,26 @@ class Transform(Serializable):
         else:
             self.rotation_ = value
 
-    def rotate(self, other):
+    def rotate(self, other: Union[Position, Rotation]) -> Union[Position,
+                                                                Rotation]:
+        """Rotate a Position or Rotation by the transform's rotation component.
+
+        Args:
+            other (Union[Position, Rotation]): a Position or Rotation to rotate.
+
+        Returns:
+            Union[Position, Rotation]: the resulting Position or Rotation (same
+                as other).
+        """
         return self.rotation.rotate(other)
 
     def inverse(self):
+        """Return the inverse of the transform (lazily evaluated, simpy inverts
+        the 'inverted' property).
+
+        Returns:
+            Transform: the resulting Transform
+        """
         return Transform(self.position_, self.rotation_, (not self.inverted_))
 
     def encode(self, *args, **kwargs) -> bytes:
@@ -334,14 +561,6 @@ class Transform(Serializable):
         return cls(pos, rot, inv)
 
     def __imul__(self, other):
-        # if self.inverted_:
-        #    if other.inverted_:
-        #        # (B*A)^-1
-        #        self.position_ = other.position_ + \
-        #            other.rotation_.rotate(self.position_)
-        #        self.rotation_ = other.rotation_.rotate(self.rotation_)
-        #        return self
-
         self.position += self.rotation.rotate(other.position)
         self.rotation = self.rotation.rotate(other.rotation)
         return self
@@ -361,30 +580,3 @@ class Transform(Serializable):
 
     def __repr__(self):
         return '({},{},{})'.format(repr(self.position_), repr(self.rotation_), self.inverted_)
-
-
-def main():
-    # Test pickle
-    import pickle
-    pickle.dumps(Position.identity())
-    pickle.dumps(Rotation.identity())
-    pickle.dumps(Transform.identity())
-
-    # Test broadcasting
-    poss = Position.random(size=(5,))
-    rots = Rotation.random(size=(1,))
-    print(rots.rotate(poss).shape)
-
-    # Test matrix conversion
-    for _ in range(100):
-        T = Transform.random()
-        Tm = T.to_matrix()
-        p = Position.random()
-        a = T * p
-        b = Tm.dot(np.append(p, [1.0], axis=-1))[..., :3]
-        if not np.allclose(a, b):
-            print('{} != {}'.format(a, b))
-
-
-if __name__ == '__main__':
-    main()

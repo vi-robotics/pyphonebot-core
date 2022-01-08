@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import time
+from typing import Callable
 import asyncio
 import concurrent.futures
 import logging
@@ -10,10 +11,24 @@ from phonebot.core.common.comm.protocol import send, recv
 
 
 class SimpleClient(object):
-    def __init__(self, addr='127.0.0.1', port=11411, start=True):
+    def __init__(self, addr: str = '127.0.0.1', port: int = 11411,
+                 start: bool = True):
+        """A simple client instance which sends data from a StreamWriter
+        connected on the given address and port of a server. The server
+        should be started first.
+
+        Args:
+            addr (str, optional): The address to connect to. Defaults to
+                '127.0.0.1'.
+            port (int, optional): The port to connect to. Defaults to 11411.
+            start (bool, optional): If True, then start the client on
+                initialization. This will start the asyncio event loop.
+                Defaults to True.
+        """
         self.addr = addr
         self.port = port
         self.loop = asyncio.get_event_loop()
+
         # NOTE(yycho0108): StreamWriter is NOT thread safe.
         self.pool = concurrent.futures.ThreadPoolExecutor(1)
         self.reader = None
@@ -23,17 +38,23 @@ class SimpleClient(object):
 
     @property
     def connected(self) -> bool:
+        """True if the client is connected to the server. False otherwise.
+
+
+        Returns:
+            bool: Connection status
+        """
         return (self.writer is not None)
 
     def __del__(self):
-        if self.reader is not None:
-            self.reader.close()
         if self.writer is not None:
             self.writer.close()
         self.loop.close()
         self.pool.shutdown()
 
     def start(self):
+        """Start the client and asyncio event loop.
+        """
         if self.reader is None and self.writer is None:
             try:
                 task = self.loop.create_task(asyncio.open_connection(self.addr, self.port,
@@ -50,33 +71,20 @@ class SimpleClient(object):
         if on_done is not None:
             on_done(result)
 
-    def send(self, message: bytes, on_done=None, wait=False):
+    def send(self, message: bytes, on_done: Callable[[bytes], None] = None,
+             wait: bool = False):
+        """Send data to the server.
+
+        Args:
+            message (bytes): A byte array to send.
+            on_done (Callable[[bytes], None], optional): An optional callback
+                to call when send is complete. Defaults to None.
+            wait (bool, optional): If True, then perform the action
+                synchronously, else asynchronous. Defaults to False.
+        """
         if wait:
             # synchronous execution
             self._send(message, on_done)
         else:
             # asynchronous execution
             self.pool.submit(self._send, message, on_done)
-
-
-def main():
-    import numpy as np
-
-    def on_done(x):
-        print('on_done')
-        print(x)
-
-    client = SimpleClient()
-    # client.start()
-    b = np.random.normal(size=(512, 512)).tobytes()
-    for _ in range(5):
-        client.send(b, on_done)
-
-    # wait 5 sec.
-    now = time.time()
-    while time.time() < (now + 5):
-        time.sleep(0.1)
-
-
-if __name__ == '__main__':
-    main()

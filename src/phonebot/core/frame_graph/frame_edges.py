@@ -14,7 +14,7 @@ from abc import abstractmethod, ABCMeta
 from phonebot.core.common.serial import Serializable, encode, decode
 from phonebot.core.common.util import find_nearest_index, find_k_nearest_indices, get_time
 from phonebot.core.common.math.utils import normalize, adiff, rotation_between_vectors, tlerp
-from phonebot.core.common.geometry.geometry import tangent_component
+from phonebot.core.common.geometry.geometry import perpendicular_component
 from phonebot.core.common.math.transform import Position, Rotation, Transform
 
 logger = logging.getLogger(__name__)
@@ -439,12 +439,12 @@ class RevoluteJointEdge(ParametricFrameEdge):
         Get the angle from the transform.
         Note that the rotation component of the transform is ignored.
         """
-        source = tangent_component(self.offset_, self.axis_)
+        source = perpendicular_component(self.offset_, self.axis_)
         if isinstance(transform, Transform):
-            target = tangent_component(transform.position, self.axis_)
+            target = perpendicular_component(transform.position, self.axis_)
         # elif isinstance(transform, Position):
         else:
-            target = tangent_component(transform, self.axis_)
+            target = perpendicular_component(transform, self.axis_)
 
         rotation = rotation_between_vectors(source, target)
         # validation ...
@@ -484,7 +484,8 @@ class RevoluteJointEdge(ParametricFrameEdge):
 
     @classmethod
     def decode(cls, data: bytes, *args, **kwargs):
-        source, target, stamp, param, axis, offset, xfm = decode(data, *args, **kwargs)
+        source, target, stamp, param, axis, offset, xfm = decode(
+            data, *args, **kwargs)
         out = cls(source, target, axis, offset)
         out.stamp_ = stamp
         out.param_ = param
